@@ -1,130 +1,180 @@
-<main>
-  <!-- Info popup (which question you should have answered) -->
-  @if (showInfoPopup()) {
-    <div class="vcms__popup" style="opacity: 1; visibility: visible;">
-      <div class="inner" style="opacity: 1; margin-bottom: 0;">
-        <div class="header" style="text-align: center;">
-          السوال دا المفروض تجاوبوه يا
-        </div>
-        <div class="txt" style="text-align: center;">
-          <h1 id="infoQuestion">{{ current().infoQuest }}</h1>
-        </div>
-        <div class="footer">
-          <label class="close" (click)="showInfoPopup.set(false)">X</label>
-        </div>
+@if (phase() === 'picker') {
+  <!-- ============ Section picker ============ -->
+  <main>
+    <div class="game-quiz-container picker">
+      <h1 class="picker-title">اختر الأقسام</h1>
+      <p class="picker-sub">Pick one or more sections to play</p>
+
+      <div class="picker-tools">
+        <button class="chip" (click)="selectAll()">Select all</button>
+        <button class="chip" (click)="clearAll()">Clear</button>
       </div>
-    </div>
-  }
 
-  <!-- Score modal -->
-  <div
-    class="modal-container"
-    id="score-modal"
-    [style.display]="showScoreModal() ? 'flex' : 'none'"
-  >
-    <div class="modal-content-container">
-      <h1>Congratulations, Quiz Completed.</h1>
-      <div class="grade-details">
-        <p>Attempts : {{ total }}</p>
-        <p>Wrong Answers : <span id="wrong-answers">{{ wrongAttempt() }}</span></p>
-        <p>Right Answers : <span id="right-answers">{{ playerScore() }}</span></p>
-        <p>Grade : <span id="grade-percentage">{{ gradePercentage() }}</span>%</p>
-        <p><span id="remarks" [style.color]="remarkColor()">{{ remark() }}</span></p>
+      <div class="section-grid">
+        @for (s of sections(); track s.id) {
+          <button
+            class="section-chip"
+            [class.on]="isChosen(s.id)"
+            (click)="toggleSection(s.id)"
+          >
+            <span class="sc-name">{{ s.name }}</span>
+            <span class="sc-count">{{ sectionCount(s.id) }} Q</span>
+          </button>
+        }
       </div>
-      <div class="modal-button-container">
-        <button (click)="closeScoreModal()">Continue</button>
+
+      <div class="next-button-container">
+        <button
+          [disabled]="chosen().size === 0"
+          (click)="startQuiz()"
+        >
+          ابدأ ▶
+        </button>
       </div>
+
+      <a routerLink="/admin" class="admin-link">⚙️ Admin dashboard</a>
     </div>
-  </div>
-
-  <div class="game-details-container">
-    <h1 style="text-align: start;">
-      <img src="img/score.png" alt="" />
-      <span id="player-score">{{ playerScore() }}</span> / {{ total }}
-    </h1>
-
-    <div class="pauseaaa" (click)="toggleMusic()">
-      <img
-        src="img/1.gif"
-        alt=""
-        style="text-align: center; display:flex;"
-      />
-    </div>
-
-    <label (click)="showInfoPopup.set(true)">
-      <h1 style="text-align: end;"><img src="img/quest.png" alt="" /></h1>
-    </label>
-    <h1><span id="question-number">{{ questionNumber() }}</span> / {{ total }}</h1>
-    <div id="app"></div>
-  </div>
-
-  <div class="song">
-    <div class="player">
-      @if (musicPlaying()) {
-        <audio class="audio" src="audio/hh.mp3" autoplay loop></audio>
-      }
-    </div>
-  </div>
-
-  <app-timer (timeUp)="onTimeUp()" />
-
-  <!-- Image zoom modal -->
-  <div
-    id="myModal"
-    class="modal"
-    [style.display]="showImageModal() ? 'block' : 'none'"
-  >
-    <span class="close" (click)="closeImageModal()">&times;</span>
-    <img class="modal-content" id="img01" [src]="modalImageSrc()" />
-    <div id="caption">{{ modalImageAlt() }}</div>
-  </div>
-
-  <div class="game-quiz-container">
-    <div class="game-question-container">
-      <h1 id="display-question" (click)="onQuestionClick($event)"
-        [innerHTML]="questionHtml()"></h1>
-    </div>
-
-    <div class="game-options-container">
-      <!-- "you didn't answer" modal -->
-      <div
-        class="modal-container"
-        id="option-modal"
-        [style.display]="showOptionModal() ? 'flex' : 'none'"
-      >
-        <div class="modal-content-container">
-          <h1>مجاوبتوش السوال ليه ياعم</h1>
-          <h1>السوال بتاعكم والاجابه مسؤلين عنها</h1>
-          <div class="modal-button-container">
-            <button (click)="closeOptionModal()">Continue</button>
+  </main>
+} @else {
+  <!-- ============ Quiz ============ -->
+  <main>
+    <!-- Info popup -->
+    @if (showInfoPopup()) {
+      <div class="vcms__popup" style="opacity: 1; visibility: visible;">
+        <div class="inner" style="opacity: 1; margin-bottom: 0;">
+          <div class="header" style="text-align: center;">
+            السوال دا المفروض تجاوبوه يا
+          </div>
+          <div class="txt" style="text-align: center;">
+            <h1 id="infoQuestion">{{ current()?.infoQuest }}</h1>
+          </div>
+          <div class="footer">
+            <label class="close" (click)="showInfoPopup.set(false)">X</label>
           </div>
         </div>
       </div>
+    }
 
-      @for (opt of options(); track opt.id) {
-        <span>
-          <input
-            type="radio"
-            name="option"
-            class="radio"
-            [value]="opt.key"
-            [checked]="selected() === opt.key"
-            (change)="selectOption(opt.key)"
-            [id]="opt.id + '-input'"
-          />
-          <label
-            [for]="opt.id + '-input'"
-            class="option"
-            [id]="opt.id"
-            [style.backgroundColor]="optionColors()[opt.id] || ''"
-            >{{ opt.label }}</label
-          >
-        </span>
-      }
+    <!-- Score modal -->
+    <div
+      class="modal-container"
+      id="score-modal"
+      [style.display]="showScoreModal() ? 'flex' : 'none'"
+    >
+      <div class="modal-content-container">
+        <h1>Congratulations, Quiz Completed.</h1>
+        <div class="grade-details">
+          <p>Attempts <span>{{ total }}</span></p>
+          <p>Wrong Answers <span id="wrong-answers">{{ wrongAttempt() }}</span></p>
+          <p>Right Answers <span id="right-answers">{{ playerScore() }}</span></p>
+          <p>Grade <span id="grade-percentage">{{ gradePercentage() }}%</span></p>
+          <p>
+            <span id="remarks" [style.color]="remarkColor()">{{ remark() }}</span>
+          </p>
+        </div>
+        <div class="modal-button-container">
+          <button (click)="closeScoreModal()">Continue</button>
+        </div>
+      </div>
     </div>
 
-    <div class="next-button-container">
-      <button (click)="handleNextQuestion()">السؤال الي بعده</button>
+    <div class="game-details-container">
+      <h1 style="text-align: start;">
+        <img src="img/score.png" alt="" />
+        <span id="player-score">{{ playerScore() }}</span> / {{ total }}
+      </h1>
+
+      <div class="pauseaaa" (click)="toggleMusic()">
+        <img src="img/1.gif" alt="" />
+      </div>
+
+      <label (click)="showInfoPopup.set(true)">
+        <h1 style="text-align: end;"><img src="img/quest.png" alt="" /></h1>
+      </label>
+      <h1>
+        <span id="question-number">{{ questionNumber() }}</span> / {{ total }}
+      </h1>
     </div>
-  </div>
-</main>
+
+    <div class="song">
+      <div class="player">
+        @if (musicPlaying()) {
+          <audio class="audio" src="audio/hh.mp3" autoplay loop></audio>
+        }
+      </div>
+    </div>
+
+    <app-timer
+      [duration]="timePerQuestion()"
+      [resetKey]="timerKey()"
+      (timeUp)="onTimeUp()"
+    />
+
+    <!-- Image zoom modal -->
+    <div
+      id="myModal"
+      class="modal"
+      [style.display]="showImageModal() ? 'block' : 'none'"
+    >
+      <span class="close" (click)="closeImageModal()">&times;</span>
+      <img class="modal-content" id="img01" [src]="modalImageSrc()" />
+      <div id="caption">{{ modalImageAlt() }}</div>
+    </div>
+
+    <div class="game-quiz-container">
+      <div class="game-question-container">
+        <h1
+          id="display-question"
+          (click)="onQuestionClick($event)"
+          [innerHTML]="questionHtml()"
+        ></h1>
+      </div>
+
+      <div class="game-options-container">
+        <!-- "you didn't answer" modal -->
+        <div
+          class="modal-container"
+          id="option-modal"
+          [style.display]="showOptionModal() ? 'flex' : 'none'"
+        >
+          <div class="modal-content-container">
+            <h1>مجاوبتوش السوال ليه ياعم</h1>
+            <h1>السوال بتاعكم والاجابه مسؤلين عنها</h1>
+            <div class="modal-button-container">
+              <button (click)="closeOptionModal()">Continue</button>
+            </div>
+          </div>
+        </div>
+
+        @for (opt of options(); track opt.id) {
+          <span>
+            <input
+              type="radio"
+              name="option"
+              class="radio"
+              [value]="opt.key"
+              [checked]="selected() === opt.key"
+              (change)="selectOption(opt.key)"
+              [id]="opt.id + '-input'"
+            />
+            <label
+              [for]="opt.id + '-input'"
+              class="option"
+              [id]="opt.id"
+              [style.backgroundColor]="optionColors()[opt.id] || ''"
+              >{{ opt.label }}</label
+            >
+          </span>
+        }
+      </div>
+
+      <div class="next-button-container">
+        <button (click)="handleNextQuestion()">السؤال الي بعده</button>
+      </div>
+    </div>
+
+    <a (click)="backToPicker()" class="admin-link" style="cursor: pointer;"
+      >← Back to sections</a
+    >
+  </main>
+}

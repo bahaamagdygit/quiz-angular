@@ -1,7 +1,8 @@
-import { Component, computed, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { RouterLink } from '@angular/router';
 import { TimerComponent } from './timer.component';
-import { QUESTIONS, Question } from './questions';
+import { QuizDataService, AdminQuestion } from './quiz-data.service';
 
 type OptionKey = 'optionA' | 'optionB' | 'optionC' | 'optionD';
 
@@ -11,31 +12,40 @@ interface OptionView {
   label: string;
 }
 
-// Original quiz.js targeted 111 questions, but the dataset has fewer unique
-// questions, so the deck length is capped to what's actually available
-// (the original while-loop would have spun forever otherwise).
-const TOTAL = Math.min(111, QUESTIONS.length);
-
 @Component({
   selector: 'app-quiz',
   standalone: true,
-  imports: [TimerComponent],
+  imports: [TimerComponent, RouterLink],
   templateUrl: './quiz.component.html',
 })
 export class QuizComponent {
-  protected readonly total = TOTAL;
+  private readonly sanitizer = inject(DomSanitizer);
+  private readonly data = inject(QuizDataService);
 
-  private shuffled: Question[] = [];
-  private indexNumber = 0;
+  /** 'picker' = choosing sections, 'playing' = quiz running. */
+  protected readonly phase = signal<'picker' | 'playing'>('picker');
+
+  protected readonly sections = this.data.sections;
+  protected readonly timePerQuestion = this.data.timePerQuestion;
+
+  /** Section ids ticked on the picker screen. */
+  protected readonly chosen = signal<Set<string>>(new Set());
+
+  private deck: AdminQuestion[] = [];
+  protected total = 0;
 
   protected readonly questionNumber = signal(1);
   protected readonly playerScore = signal(0);
   protected readonly wrongAttempt = signal(0);
 
-  protected readonly current = signal<Question>(QUESTIONS[0]);
+  /** Bumped on every new question to auto-reset the timer. */
+  protected readonly timerKey = signal(0);
+
+  private indexNumber = 0;
+  protected readonly current = signal<AdminQuestion | null>(null);
   protected readonly selected = signal<OptionKey | null>(null);
-  /** Per-option background color after an answer is checked. */
   protected readonly optionColors = signal<Record<string, string>>({});
+  protected readonly answered = signal(false);
 
   protected readonly showInfoPopup = signal(false);
   protected readonly showScoreModal = signal(false);
@@ -45,57 +55,100 @@ export class QuizComponent {
   protected readonly modalImageAlt = signal('');
 
   protected readonly musicPlaying = signal(true);
-
   protected readonly remark = signal('');
   protected readonly remarkColor = signal('');
 
   protected readonly options = computed<OptionView[]>(() => {
     const q = this.current();
-    return [
+    if (!q) return [];
+    const all: OptionView[] = [
       { id: 'option-one-label', key: 'optionA', label: q.optionA },
       { id: 'option-two-label', key: 'optionB', label: q.optionB },
       { id: 'option-three-label', key: 'optionC', label: q.optionC },
       { id: 'option-four-label', key: 'optionD', label: q.optionD },
     ];
+    // Hide blank C/D so true/false style questions look right.
+    return all.filter((o) => o.label.trim() !== '');
   });
 
   protected readonly questionHtml = computed<SafeHtml>(() =>
-    this.sanitizer.bypassSecurityTrustHtml(this.current().question),
+    this.sanitizer.bypassSecurityTrustHtml(this.current()?.question ?? ''),
   );
 
-  protected readonly gradePercentage = computed(
-    () => (this.playerScore() / TOTAL) * 100,
+  protected readonly gradePercentage = computed(() =>
+    this.total ? Math.round((this.playerScore() / this.total) * 100) : 0,
   );
 
-  constructor(private sanitizer: DomSanitizer) {
-    this.nextQuestion(0);
+  // ---- picker -----------------------------------------------------------
+  protected toggleSection(id: string): void {
+    this.chosen.update((set) => {
+      const next = new Set(set);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }
 
-  /** Shuffle and fill the deck (port of handleQuestions). */
-  private handleQuestions(): void {
-    while (this.shuffled.length < TOTAL) {
-      const random =
-        QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)];
-      if (!this.shuffled.includes(random)) {
-        this.shuffled.push(random);
-      }
-    }
+  protected isChosen(id: string): boolean {
+    return this.chosen().has(id);
   }
 
-  private nextQuestion(index: number): void {
-    this.handleQuestions();
-    this.current.set(this.shuffled[index]);
+  protected selectAll(): void {
+    this.chosen.set(new Set(this.sections().map((s) => s.id)));
+  }
+
+  protected clearAll(): void {
+    this.chosen.set(new Set());
+  }
+
+  protected sectionCount(id: string): number {
+    return this.data
+      .questions()
+      .filter(
+        (q) =>
+          q.sectionId === id &&
+          q.question.trim() &&
+          q.optionA.trim() &&
+          q.optionB.trim(),
+      ).length;
+  }
+
+  protected startQuiz(): void {
+    const ids = [...this.chosen()];
+    if (ids.length === 0) return;
+    this.deck = this.data.buildDeck(ids);
+    if (this.deck.length === 0) return;
+    this.total = this.deck.length;
+    this.indexNumber = 0;
+    this.questionNumber.set(1);
+    this.playerScore.set(0);
+    this.wrongAttempt.set(0);
+    this.loadQuestion(0);
+    this.phase.set('playing');
+  }
+
+  protected backToPicker(): void {
+    this.phase.set('picker');
+    this.showScoreModal.set(false);
+  }
+
+  // ---- quiz flow --------------------------------------------------------
+  private loadQuestion(index: number): void {
+    this.current.set(this.deck[index]);
     this.selected.set(null);
     this.optionColors.set({});
+    this.answered.set(false);
+    this.timerKey.update((k) => k + 1); // auto-resets + starts timer
   }
 
   protected selectOption(key: OptionKey): void {
+    if (this.answered()) return;
     this.selected.set(key);
   }
 
-  /** Port of checkForAnswer. */
   private checkForAnswer(): void {
-    const answer = this.current().correctOption;
+    const q = this.current();
+    if (!q) return;
+    const answer = q.correctOption;
     const choice = this.selected();
     const correctId = this.options().find((o) => o.key === answer)?.id;
 
@@ -104,12 +157,11 @@ export class QuizComponent {
       return;
     }
 
+    this.answered.set(true);
     if (choice === answer) {
       this.optionColors.update((c) => ({ ...c, [correctId!]: 'green' }));
       this.playSound('audio/good.mp3');
       this.playerScore.update((s) => s + 1);
-      this.indexNumber++;
-      setTimeout(() => this.questionNumber.update((n) => n + 1), 1000);
     } else {
       const wrongId = this.options().find((o) => o.key === choice)?.id;
       this.optionColors.update((c) => ({
@@ -119,58 +171,72 @@ export class QuizComponent {
       }));
       this.playSound('audio/bad.mp3');
       this.wrongAttempt.update((w) => w + 1);
-      this.indexNumber++;
-      setTimeout(() => this.questionNumber.update((n) => n + 1), 1000);
     }
+    this.indexNumber++;
+    setTimeout(() => this.questionNumber.update((n) => n + 1), 1000);
   }
 
-  /** Port of handleNextQuestion. */
   protected handleNextQuestion(): void {
     const hadSelection = this.selected() !== null;
-    this.checkForAnswer();
-
-    if (!hadSelection) {
-      return; // option modal shown, stay on the question
+    if (!this.answered()) {
+      this.checkForAnswer();
+      if (!hadSelection) return; // option modal shown, stay
     }
 
     setTimeout(() => {
-      if (this.indexNumber < TOTAL) {
-        this.nextQuestion(this.indexNumber);
+      if (this.indexNumber < this.total) {
+        this.loadQuestion(this.indexNumber);
       } else {
         this.handleEndGame();
       }
     }, 1000);
   }
 
-  /** Port of handleEndGame. */
+  /** Time ran out: mark wrong, reveal the answer, auto-advance. */
+  protected onTimeUp(): void {
+    if (this.answered()) return;
+    this.playSound('audio/bad.mp3');
+    const q = this.current();
+    const correctId = this.options().find(
+      (o) => o.key === q?.correctOption,
+    )?.id;
+    this.answered.set(true);
+    this.wrongAttempt.update((w) => w + 1);
+    if (correctId) {
+      this.optionColors.update((c) => ({ ...c, [correctId]: 'green' }));
+    }
+    this.indexNumber++;
+    setTimeout(() => {
+      this.questionNumber.update((n) => n + 1);
+      if (this.indexNumber < this.total) {
+        this.loadQuestion(this.indexNumber);
+      } else {
+        this.handleEndGame();
+      }
+    }, 1500);
+  }
+
   private handleEndGame(): void {
-    const score = this.playerScore();
+    const pct = this.gradePercentage();
     let remark = '';
     let color = '';
-
-    if (score <= 50) {
+    if (pct < 50) {
       remark = 'Bad Grades, Keep Practicing.';
-      color = 'red';
-    } else if (score >= 80 && score < 95) {
+      color = '#ef4444';
+    } else if (pct < 80) {
       remark = 'Average Grades, You can do better.';
-      color = 'orange';
-    } else if (score >= 100) {
+      color = '#f59e0b';
+    } else {
       remark = 'Excellent, Keep the good work going.';
-      color = 'green';
+      color = '#22c55e';
     }
-
     this.remark.set(remark);
     this.remarkColor.set(color);
     this.showScoreModal.set(true);
   }
 
   protected closeScoreModal(): void {
-    this.questionNumber.set(1);
-    this.playerScore.set(0);
-    this.wrongAttempt.set(0);
-    this.indexNumber = 0;
-    this.shuffled = [];
-    this.nextQuestion(this.indexNumber);
+    this.phase.set('picker');
     this.showScoreModal.set(false);
   }
 
@@ -182,7 +248,6 @@ export class QuizComponent {
     this.musicPlaying.update((p) => !p);
   }
 
-  /** Opens the zoom modal for an embedded question image. */
   protected onQuestionClick(event: MouseEvent): void {
     const target = event.target as HTMLElement;
     if (target.tagName === 'IMG') {
@@ -195,10 +260,6 @@ export class QuizComponent {
 
   protected closeImageModal(): void {
     this.showImageModal.set(false);
-  }
-
-  protected onTimeUp(): void {
-    this.playSound('audio/bad.mp3');
   }
 
   private playSound(src: string): void {

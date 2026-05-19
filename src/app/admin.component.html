@@ -1,0 +1,229 @@
+@if (!authed()) {
+  <!-- ---------- Password gate ---------- -->
+  <main class="admin-gate">
+    <div class="glass-card login-card">
+      <h1>🔒 Admin Login</h1>
+      <input
+        type="password"
+        placeholder="Password"
+        [ngModel]="pwInput()"
+        (ngModelChange)="pwInput.set($event)"
+        (keyup.enter)="login()"
+      />
+      @if (pwError()) {
+        <p class="err">Wrong password</p>
+      }
+      <button class="btn-primary" (click)="login()">Enter</button>
+      <a routerLink="/" class="link">← Back to quiz</a>
+    </div>
+  </main>
+} @else {
+  <!-- ---------- Dashboard ---------- -->
+  <main class="admin">
+    <header class="admin-bar glass-card">
+      <h1>⚙️ Quiz Admin</h1>
+      <div class="bar-actions">
+        @if (savedFlash()) { <span class="saved">✓ Saved</span> }
+        <a routerLink="/" class="btn-ghost">▶ Open Quiz</a>
+        <button class="btn-ghost danger" (click)="resetAll()">
+          Reset to default
+        </button>
+      </div>
+    </header>
+
+    <section class="settings glass-card">
+      <div class="field">
+        <label>Time per question (seconds)</label>
+        <input
+          type="number"
+          min="5"
+          [ngModel]="timePerQuestion()"
+          (change)="saveTime($any($event.target).value)"
+        />
+      </div>
+      <div class="field">
+        <label>Admin password</label>
+        <input
+          type="text"
+          placeholder="new password"
+          (change)="savePassword($any($event.target).value)"
+        />
+      </div>
+    </section>
+
+    <div class="admin-grid">
+      <!-- Sections column -->
+      <aside class="glass-card sections-col">
+        <h2>Sections</h2>
+        <div class="add-row">
+          <input
+            placeholder="New section name"
+            [ngModel]="newSectionName()"
+            (ngModelChange)="newSectionName.set($event)"
+            (keyup.enter)="addSection()"
+          />
+          <button class="btn-primary sm" (click)="addSection()">+ Add</button>
+        </div>
+
+        <ul class="section-list">
+          @for (s of sections(); track s.id; let i = $index) {
+            <li
+              [class.active]="s.id === selectedSectionId()"
+              (click)="selectedSectionId.set(s.id)"
+            >
+              <input
+                class="name-input"
+                [value]="s.name"
+                (click)="$event.stopPropagation()"
+                (change)="renameSection(s.id, $any($event.target).value)"
+              />
+              <div class="row-actions" (click)="$event.stopPropagation()">
+                <button
+                  [disabled]="i === 0"
+                  (click)="moveSection(s.id, -1)"
+                  title="Move up"
+                >
+                  ▲
+                </button>
+                <button
+                  [disabled]="i === sections().length - 1"
+                  (click)="moveSection(s.id, 1)"
+                  title="Move down"
+                >
+                  ▼
+                </button>
+                <button
+                  class="del"
+                  (click)="deleteSection(s.id)"
+                  title="Delete"
+                >
+                  ✕
+                </button>
+              </div>
+            </li>
+          }
+        </ul>
+      </aside>
+
+      <!-- Questions column -->
+      <section class="glass-card questions-col">
+        @if (selectedSectionId()) {
+          <div class="q-head">
+            <h2>{{ selectedSectionName() }} — Questions</h2>
+            <button class="btn-primary sm" (click)="addQuestion()">
+              + Add question
+            </button>
+          </div>
+
+          @if (sectionQuestions().length === 0) {
+            <p class="empty">No questions yet. Add one above.</p>
+          }
+
+          @for (q of sectionQuestions(); track q.id; let i = $index) {
+            <div class="q-card">
+              <div class="q-card-head">
+                <span class="q-num">Q{{ i + 1 }}</span>
+                <div class="row-actions">
+                  <button
+                    [disabled]="i === 0"
+                    (click)="moveQuestion(q.id, -1)"
+                    title="Move up"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    [disabled]="i === sectionQuestions().length - 1"
+                    (click)="moveQuestion(q.id, 1)"
+                    title="Move down"
+                  >
+                    ▼
+                  </button>
+                  <button
+                    class="del"
+                    (click)="deleteQuestion(q.id)"
+                    title="Delete"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                class="q-text"
+                placeholder="Question text (HTML allowed)"
+                [value]="q.question"
+                (change)="patch(q.id, 'question', $any($event.target).value)"
+              ></textarea>
+
+              <div class="opts">
+                @for (opt of ['A', 'B', 'C', 'D']; track opt) {
+                  <label class="opt-row">
+                    <input
+                      type="radio"
+                      [name]="'correct-' + q.id"
+                      [checked]="q.correctOption === 'option' + opt"
+                      (change)="
+                        patch(q.id, 'correctOption', 'option' + opt)
+                      "
+                      title="Mark as correct answer"
+                    />
+                    <span class="opt-tag">{{ opt }}</span>
+                    @if (opt === 'A') {
+                      <input
+                        class="opt-input"
+                        placeholder="Option A"
+                        [value]="q.optionA"
+                        (change)="
+                          patch(q.id, 'optionA', $any($event.target).value)
+                        "
+                      />
+                    }
+                    @if (opt === 'B') {
+                      <input
+                        class="opt-input"
+                        placeholder="Option B"
+                        [value]="q.optionB"
+                        (change)="
+                          patch(q.id, 'optionB', $any($event.target).value)
+                        "
+                      />
+                    }
+                    @if (opt === 'C') {
+                      <input
+                        class="opt-input"
+                        placeholder="Option C (optional)"
+                        [value]="q.optionC"
+                        (change)="
+                          patch(q.id, 'optionC', $any($event.target).value)
+                        "
+                      />
+                    }
+                    @if (opt === 'D') {
+                      <input
+                        class="opt-input"
+                        placeholder="Option D (optional)"
+                        [value]="q.optionD"
+                        (change)="
+                          patch(q.id, 'optionD', $any($event.target).value)
+                        "
+                      />
+                    }
+                  </label>
+                }
+              </div>
+
+              <input
+                class="info-input"
+                placeholder="Hint / info shown in the (?) popup"
+                [value]="q.infoQuest"
+                (change)="patch(q.id, 'infoQuest', $any($event.target).value)"
+              />
+            </div>
+          }
+        } @else {
+          <p class="empty">Create or select a section to manage questions.</p>
+        }
+      </section>
+    </div>
+  </main>
+}
